@@ -1,0 +1,24 @@
+# Final target: QLoRA (4-bit NF4) adapter on Qwen3.5-9B (multimodal).
+# Vision encoder is frozen; LoRA is applied to the language model only.
+name_or_path: Qwen/Qwen3.5-9B
+modality: multimodal
+attn_implementation: sdpa      # Windows-safe; flash_attention_2 rarely builds on Windows
+torch_dtype: bfloat16
+freeze_vision: true
+gradient_checkpointing: true
+trust_remote_code: false
+
+quant:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  target_modules: auto         # discovered at runtime (MoE / attention linears)
+  modules_to_save: []
+  task_type: CAUSAL_LM

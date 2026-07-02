@@ -1,0 +1,21 @@
+# CORD: receipt photos -> structured JSON (line items, totals).
+# Objective metrics out of the box (JSON validity, field F1, exact-match).
+# Swap `type`/`dataset_id`/`schema_fields` to move to your own document domain.
+type: cord
+dataset_id: naver-clova-ix/cord-v2
+schema_fields:
+  - menu           # list of {name, price, count}
+  - subtotal
+  - tax
+  - total
+instruction: >-
+  You are a receipt parser. Extract the requested fields from the receipt image
+  and return STRICT, minified JSON with exactly these top-level keys:
+  menu (list of items with name, count, price), subtotal, tax, total.
+  Output ONLY the JSON object, no explanations, no markdown fences.
+max_seq_len: 2048
+image_max_pixels: 1048576
+train_split: train
+eval_split: validation
+max_train_samples: null
+max_eval_samples: 200

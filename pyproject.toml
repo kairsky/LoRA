@@ -1,0 +1,55 @@
+[project]
+name = "lora-lab"
+version = "0.1.0"
+description = "Config-driven LoRA/QLoRA lab: multimodal (image->JSON) Structured Extractor on Qwen3.5-9B"
+readme = "README.md"
+# Python 3.14 is allowed so pip does not block, but 3.12 is STRONGLY recommended:
+# torch (cu128 nightly), bitsandbytes and other CUDA wheels lag new interpreters
+# by months, so on 3.14 you will likely hit "no matching distribution" for torch.
+requires-python = ">=3.11,<3.15"
+
+# NOTE on install order (RTX 5090 / Blackwell / sm_120 on native Windows):
+#   1) Install a Blackwell-capable PyTorch FIRST, from the cu128 nightly index:
+#        pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+#   2) Then install this project (pulls the rest below):
+#        pip install -e .
+# Qwen3.5 is bleeding-edge, so transformers is pinned to git main.
+dependencies = [
+    "transformers @ git+https://github.com/huggingface/transformers.git@main",
+    # peft must track transformers main: older peft imports BloomPreTrainedModel,
+    # which transformers 5.x removed -> ImportError on `import peft`.
+    "peft @ git+https://github.com/huggingface/peft.git@main",
+    "trl>=0.12.0",
+    "datasets>=3.0.0",
+    "accelerate>=1.0.0",
+    "bitsandbytes>=0.45.0",
+    "pydantic>=2.7.0",
+    "pyyaml>=6.0",
+    "evaluate>=0.4.2",
+    "pillow>=10.3.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6.0",
+    "ipykernel>=6.29",
+    "jupyter>=1.0",
+    "tensorboard>=2.17",
+    "wandb>=0.18",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

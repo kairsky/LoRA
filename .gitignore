@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Project artifacts
+outputs/
+data/cache/
+*.log
+
+# HF / model caches (keep them out of the repo)
+.cache/
+hf_home/
+wandb/
+runs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
