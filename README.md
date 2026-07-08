@@ -85,6 +85,55 @@ python scripts/03_evaluate.py --adapter outputs/<run_id>/adapter --limit 100
 python scripts/02_train.py --set model.lora.r=32 model.lora.lora_alpha=64 train.max_steps=200
 ```
 
+## Продвинутые возможности
+
+### Варианты адаптации (для сравнения на одной метрике)
+
+Тумблеры в `configs/model/*.yaml` (секция `lora`) или через `--set`:
+
+```powershell
+python scripts/02_train.py --set model.lora.use_dora=true          # DoRA
+python scripts/02_train.py --set model.lora.use_rslora=true         # rank-stabilized LoRA
+python scripts/02_train.py --set model.lora.init_lora_weights=pissa # PiSSA-инициализация
+python scripts/02_train.py --set model.lora.lora_plus_lr_ratio=16   # LoRA+ (LR B > LR A)
+```
+
+### JSON Schema + строгая валидация + constrained decoding
+
+`configs/data/cord.yaml` ссылается на настоящую JSON Schema (`configs/data/cord_schema.json`).
+Она используется для метрики `schema_valid_rate` и (опционально) для grammar-constrained
+декодинга, гарантирующего валидный JSON:
+
+```powershell
+pip install -e .[constrained]     # ставит outlines
+python scripts/03_evaluate.py --adapter outputs/<run_id>/adapter --constrained --out outputs/eval_run
+```
+
+### Богатый eval
+
+`scripts/03_evaluate.py` считает `json_valid_rate`, `schema_valid_rate`, `field_f1`,
+`exact_match` и **per-field** precision/recall/F1, батчит генерацию (`--batch-size`),
+нормализует числа при сравнении и пишет `predictions_*.jsonl` + `metrics.json` (`--out`).
+
+### Sweeps по гиперпараметрам
+
+```powershell
+python scripts/04_sweep.py --sweep configs/sweep/lora_rank.yaml
+```
+
+Перебирает сетку (`r`, `alpha`, ...), обучает+оценивает каждую комбинацию и складывает
+таблицу в `outputs/sweeps/<name>/results.csv`.
+
+### Тесты
+
+```powershell
+pip install -e .[dev]
+python -m pytest tests -q
+```
+
+Проверяют критичное: маскирование лейблов в коллаторе (только ответ учится в loss),
+метрики/нормализацию, JSON Schema и композицию конфигов. Гоняются на CPU за секунды.
+
 ## Оси масштабирования
 
 - **Модель**: `name_or_path` + `modality` (tiny VLM <-> Qwen3.5-9B <-> любая VLM).

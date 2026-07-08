@@ -30,7 +30,15 @@ class QuantConfig(BaseModel):
 class LoraConfigModel(BaseModel):
     """LoRA hyper-parameters. ``target_modules="auto"`` triggers runtime
     discovery of the linear layers inside the language model (see
-    ``modules_discovery``)."""
+    ``modules_discovery``).
+
+    The variant flags below are the main "understand adaptation deeply" levers:
+      - ``use_dora``  : DoRA (weight-decomposed LoRA) - separates magnitude/direction.
+      - ``use_rslora``: rank-stabilized scaling (alpha / sqrt(r) instead of alpha / r).
+      - ``init_lora_weights``: adapter init strategy - True | "gaussian" | "pissa" |
+        "pissa_niter_[N]" | "olora" | "loftq". PiSSA/OLoRA/LoftQ give better starts.
+      - ``lora_plus_lr_ratio``: if set, use LoRA+ (higher LR for the B matrices).
+    """
 
     r: int = 16
     lora_alpha: int = 32
@@ -39,6 +47,10 @@ class LoraConfigModel(BaseModel):
     target_modules: list[str] | Literal["auto"] = "auto"
     modules_to_save: list[str] = Field(default_factory=list)
     task_type: str = "CAUSAL_LM"
+    use_dora: bool = False
+    use_rslora: bool = False
+    init_lora_weights: bool | str = True
+    lora_plus_lr_ratio: float | None = None
 
 
 class ModelConfig(BaseModel):
@@ -60,6 +72,9 @@ class DataConfig(BaseModel):
     type: str
     dataset_id: str | None = None  # HF hub id or local path, dataset-specific
     schema_fields: list[str] = Field(default_factory=list)
+    # A real JSON Schema (inline dict) or a path to a .json file. Used for strict
+    # output validation (eval) and, optionally, grammar-constrained decoding.
+    json_schema: dict[str, Any] | str | None = None
     instruction: str = (
         "Extract the fields as strict, minified JSON. Output only JSON, no prose."
     )

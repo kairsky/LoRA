@@ -39,20 +39,43 @@ def parse_args() -> argparse.Namespace:
         help="Path to a trained adapter dir, or 'none' for baseline only.",
     )
     p.add_argument("--limit", type=int, default=100)
+    p.add_argument("--batch-size", type=int, default=4)
+    p.add_argument(
+        "--out",
+        default=None,
+        help="Directory to write predictions.jsonl (baseline/adapter). Default: none.",
+    )
+    p.add_argument(
+        "--constrained",
+        action="store_true",
+        help="Use grammar-constrained JSON decoding (requires .[constrained] extras).",
+    )
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     cfg = load_run_config(args.model, args.data, args.train)
+    out_dir = Path(args.out) if args.out else None
+    if out_dir:
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     # Build the (quantized) base model wrapped for PEFT; this is our baseline too.
     model, processor, _targets = build_model(cfg.model, verbose=False)
     _, eval_ds, _tc, _ec = _load_eval(cfg, processor)
 
     print(f"\n== Baseline (no adapter) on {min(args.limit, len(eval_ds))} samples ==")
-    base_metrics = evaluate(model, processor, eval_ds, cfg.data, limit=args.limit)
-    print(json.dumps(base_metrics, indent=2))
+    base_metrics = evaluate(
+        model,
+        processor,
+        eval_ds,
+        cfg.data,
+        limit=args.limit,
+        batch_size=args.batch_size,
+        predictions_path=(out_dir / "predictions_baseline.jsonl") if out_dir else None,
+        constrained=args.constrained,
+    )
+    print(json.dumps(base_metrics, indent=2, ensure_ascii=False))
 
     results = {"baseline": base_metrics}
 
@@ -60,13 +83,27 @@ def main() -> int:
         model.load_adapter(args.adapter, adapter_name="trained")
         model.set_adapter("trained")
         print(f"\n== Adapter ({args.adapter}) ==")
-        adapter_metrics = evaluate(model, processor, eval_ds, cfg.data, limit=args.limit)
-        print(json.dumps(adapter_metrics, indent=2))
+        adapter_metrics = evaluate(
+            model,
+            processor,
+            eval_ds,
+            cfg.data,
+            limit=args.limit,
+            batch_size=args.batch_size,
+            predictions_path=(out_dir / "predictions_adapter.jsonl") if out_dir else None,
+            constrained=args.constrained,
+        )
+        print(json.dumps(adapter_metrics, indent=2, ensure_ascii=False))
         results["adapter"] = adapter_metrics
 
         print("\n== Delta (adapter - baseline) ==")
-        for k in ("json_valid_rate", "field_f1", "exact_match"):
+        for k in ("json_valid_rate", "schema_valid_rate", "field_f1", "exact_match"):
             print(f"  {k}: {adapter_metrics[k] - base_metrics[k]:+.4f}")
+
+    if out_dir:
+        with open(out_dir / "metrics.json", "w", encoding="utf-8") as fh:
+            json.dump(results, fh, indent=2, ensure_ascii=False)
+        print(f"\n[eval] wrote metrics + predictions -> {out_dir}")
 
     return 0
 

@@ -61,6 +61,19 @@ def _cord_ground_truth_to_target(gt_raw: str) -> dict[str, Any]:
             return x.replace(",", "").strip()
         return x
 
+    def _as_dict(x: Any) -> dict:
+        # CORD sometimes stores sub_total/total as a list of dicts instead of a
+        # single dict; merge list entries into one dict, ignore other types.
+        if isinstance(x, dict):
+            return x
+        if isinstance(x, list):
+            merged: dict = {}
+            for item in x:
+                if isinstance(item, dict):
+                    merged.update(item)
+            return merged
+        return {}
+
     menu_raw = parsed.get("menu", [])
     if isinstance(menu_raw, dict):
         menu_raw = [menu_raw]
@@ -76,8 +89,8 @@ def _cord_ground_truth_to_target(gt_raw: str) -> dict[str, Any]:
             }
         )
 
-    sub = parsed.get("sub_total", {}) or {}
-    tot = parsed.get("total", {}) or {}
+    sub = _as_dict(parsed.get("sub_total", {}))
+    tot = _as_dict(parsed.get("total", {}))
     return {
         "menu": menu,
         "subtotal": _num(sub.get("subtotal_price", "")),

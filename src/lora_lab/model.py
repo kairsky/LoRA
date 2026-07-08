@@ -121,7 +121,7 @@ def build_model(model_cfg: ModelConfig, verbose: bool = True):
             "model.lora.target_modules explicitly in the config."
         )
 
-    lora_config = LoraConfig(
+    lora_kwargs = dict(
         r=model_cfg.lora.r,
         lora_alpha=model_cfg.lora.lora_alpha,
         lora_dropout=model_cfg.lora.lora_dropout,
@@ -129,7 +129,35 @@ def build_model(model_cfg: ModelConfig, verbose: bool = True):
         target_modules=targets,
         modules_to_save=model_cfg.lora.modules_to_save or None,
         task_type=model_cfg.lora.task_type,
+        use_dora=model_cfg.lora.use_dora,
+        use_rslora=model_cfg.lora.use_rslora,
+        init_lora_weights=model_cfg.lora.init_lora_weights,
     )
+    # LoftQ needs an explicit LoftQConfig; it re-initializes adapters to best
+    # approximate the quantization error of the base weights.
+    if model_cfg.lora.init_lora_weights == "loftq":
+        try:
+            from peft import LoftQConfig
+
+            lora_kwargs["loftq_config"] = LoftQConfig(loftq_bits=4)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[model] LoftQ requested but unavailable ({exc}); using default init")
+            lora_kwargs["init_lora_weights"] = True
+
+    lora_config = LoraConfig(**lora_kwargs)
+    if verbose:
+        variants = [
+            n
+            for n, on in (
+                ("DoRA", model_cfg.lora.use_dora),
+                ("rsLoRA", model_cfg.lora.use_rslora),
+            )
+            if on
+        ]
+        init = model_cfg.lora.init_lora_weights
+        if init is not True:
+            variants.append(f"init={init}")
+        print(f"[model] LoRA variants: {variants or ['vanilla LoRA']}")
     model = get_peft_model(model, lora_config)
 
     # Gradient checkpointing needs input grads to flow through the frozen base.

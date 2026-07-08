@@ -8,6 +8,9 @@ schema_fields:
   - subtotal
   - tax
   - total
+# Real JSON Schema (path relative to repo root): used for strict output
+# validation in eval and, optionally, grammar-constrained decoding.
+json_schema: configs/data/cord_schema.json
 instruction: >-
   You are a receipt parser. Extract the requested fields from the receipt image
   and return STRICT, minified JSON with exactly these top-level keys:

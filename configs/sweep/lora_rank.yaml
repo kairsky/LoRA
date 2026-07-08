@@ -1,0 +1,25 @@
+# Hyper-parameter sweep: how do LoRA rank / alpha affect the extractor?
+# Runs the cartesian product of `grid`, applying `fixed` overrides to every run,
+# then evaluates each and aggregates into outputs/sweeps/<name>/results.csv.
+#
+# Uses the tiny smoke model + few steps so a full sweep finishes quickly. Point
+# `model` at the 9B config for a real (slow) sweep.
+name: lora_rank
+model: configs/model/tiny_mm_smoke.yaml
+data: configs/data/cord.yaml
+train: configs/train/sft_qlora.yaml
+
+fixed:
+  train.max_steps: 30
+  train.logging_steps: 5
+  train.save_steps: 30
+  data.max_train_samples: 64
+  data.max_eval_samples: 32
+
+grid:
+  model.lora.r: [8, 16, 32]
+  model.lora.lora_alpha: [16, 32]
+
+eval:
+  limit: 32
+  batch_size: 4

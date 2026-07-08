@@ -13,6 +13,7 @@ from PIL import Image
 
 from .config import ModelConfig
 from .data import _downscale
+from .generate_utils import safe_generate
 from .model import build_model
 
 
@@ -33,6 +34,8 @@ def extract(
     instruction: str,
     max_new_tokens: int = 768,
     image_max_pixels: int | None = 1_048_576,
+    schema: dict | None = None,
+    constrained: bool = False,
 ) -> str:
     image = _downscale(Image.open(image_path).convert("RGB"), image_max_pixels)
     messages = [
@@ -41,6 +44,13 @@ def extract(
     prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = processor(text=[prompt], images=[image], return_tensors="pt")
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
-    out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+    gen_kwargs: dict = {"max_new_tokens": max_new_tokens, "do_sample": False}
+    if constrained:
+        from .constrained import build_json_logits_processor
+
+        lp = build_json_logits_processor(model, processor, schema)
+        if lp is not None:
+            gen_kwargs["logits_processor"] = lp
+    out = safe_generate(model, inputs, gen_kwargs)
     gen = out[0][inputs["input_ids"].shape[1] :]
     return processor.tokenizer.decode(gen, skip_special_tokens=True)

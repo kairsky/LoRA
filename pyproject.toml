@@ -28,15 +28,23 @@ dependencies = [
     "evaluate>=0.4.2",
     "pillow>=10.3.0",
     "numpy>=1.26",
+    "jsonschema>=4.21",
 ]
 
 [project.optional-dependencies]
 dev = [
     "ruff>=0.6.0",
+    "pytest>=8.0",
     "ipykernel>=6.29",
     "jupyter>=1.0",
     "tensorboard>=2.17",
     "wandb>=0.18",
+]
+# Grammar-constrained JSON decoding. Optional because outlines can be finicky to
+# build against a bleeding-edge custom VLM on Windows; code degrades gracefully
+# if it is not installed.
+constrained = [
+    "outlines>=0.1.0",
 ]
 
 [build-system]

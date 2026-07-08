@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["menu", "subtotal", "tax", "total"],
+  "properties": {
+    "menu": {
+      "type": "array",
+      "description": "line items on the receipt",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "count", "price"],
+        "properties": {
+          "name": { "type": "string" },
+          "count": { "type": "string" },
+          "price": { "type": "string" }
+        }
+      }
+    },
+    "subtotal": { "type": "string", "description": "subtotal amount" },
+    "tax": { "type": "string", "description": "tax amount" },
+    "total": { "type": "string", "description": "grand total amount" }
+  }
+}

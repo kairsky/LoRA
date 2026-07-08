@@ -73,33 +73,64 @@ def _build_sft_config(cfg: RunConfig, run_dir: Path):
         return TrainingArguments(**common)
 
 
-def _build_trainer(model, args, train_ds, eval_ds, collator, processor):
+def _maybe_build_loraplus_optimizer(model, cfg: RunConfig):
+    """LoRA+ uses a higher learning rate for the B matrices than the A matrices,
+    which often speeds up convergence. Returns ``(optimizer, None)`` or ``None``.
+    """
+    ratio = cfg.model.lora.lora_plus_lr_ratio
+    if not ratio:
+        return None
+    try:
+        from peft.optimizers import create_loraplus_optimizer
+
+        try:
+            import bitsandbytes as bnb
+
+            optim_cls = bnb.optim.AdamW8bit
+        except Exception:
+            from torch.optim import AdamW as optim_cls  # type: ignore
+
+        optimizer = create_loraplus_optimizer(
+            model=model,
+            optimizer_cls=optim_cls,
+            lr=cfg.train.learning_rate,
+            loraplus_lr_ratio=ratio,
+            weight_decay=cfg.train.weight_decay,
+        )
+        print(f"[train] LoRA+ enabled (B-matrix lr ratio = {ratio}) with {optim_cls.__name__}")
+        return (optimizer, None)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[train] LoRA+ requested but unavailable ({exc}); using default optimizer")
+        return None
+
+
+def _build_trainer(model, args, train_ds, eval_ds, collator, processor, optimizers=None):
+    kwargs = dict(
+        model=model,
+        args=args,
+        train_dataset=train_ds,
+        eval_dataset=eval_ds,
+        data_collator=collator,
+        processing_class=processor,
+    )
+    if optimizers is not None:
+        kwargs["optimizers"] = optimizers
     try:
         from trl import SFTTrainer
 
-        return SFTTrainer(
-            model=model,
-            args=args,
-            train_dataset=train_ds,
-            eval_dataset=eval_ds,
-            data_collator=collator,
-            processing_class=processor,
-        )
+        return SFTTrainer(**kwargs)
     except Exception:
         from transformers import Trainer
 
-        return Trainer(
-            model=model,
-            args=args,
-            train_dataset=train_ds,
-            eval_dataset=eval_ds,
-            data_collator=collator,
-            processing_class=processor,
-        )
+        return Trainer(**kwargs)
 
 
-def run(cfg: RunConfig) -> Path:
-    """Execute a full SFT run; returns the path to the saved adapter."""
+def run(cfg: RunConfig, return_model: bool = False):
+    """Execute a full SFT run.
+
+    Returns the adapter path, or ``(adapter_path, model, processor)`` when
+    ``return_model=True`` (used by the sweep runner to evaluate in-memory).
+    """
     from transformers import set_seed
 
     set_seed(cfg.train.seed)
@@ -112,7 +143,10 @@ def run(cfg: RunConfig) -> Path:
     print(f"[train] train samples = {len(train_ds)}, eval samples = {len(eval_ds)}")
 
     args = _build_sft_config(cfg, run_dir)
-    trainer = _build_trainer(model, args, train_ds, eval_ds, train_collator, processor)
+    optimizers = _maybe_build_loraplus_optimizer(model, cfg)
+    trainer = _build_trainer(
+        model, args, train_ds, eval_ds, train_collator, processor, optimizers=optimizers
+    )
     trainer.add_callback(VramCallback())
 
     trainer.train()
@@ -121,4 +155,6 @@ def run(cfg: RunConfig) -> Path:
     trainer.save_model(str(adapter_dir))
     processor.save_pretrained(str(adapter_dir))
     print(f"[train] saved LoRA adapter -> {adapter_dir}")
+    if return_model:
+        return adapter_dir, model, processor
     return adapter_dir
