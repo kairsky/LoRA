@@ -125,6 +125,33 @@ def _build_trainer(model, args, train_ds, eval_ds, collator, processor, optimize
         return Trainer(**kwargs)
 
 
+def _strip_instance_forward_patches(model) -> None:
+    """Remove instance-level ``forward`` overrides left behind by the trainer.
+
+    TRL's SFTTrainer replaces the model's ``forward`` with a chunked
+    cross-entropy wrapper (``_chunked_ce_forward``) for memory-efficient
+    training and does not undo it after ``train()``. The wrapper hides the real
+    forward signature from ``generate()``, which breaks model-kwarg validation
+    (e.g. rejects ``mm_token_type_ids``) and KV-cache/cache_position
+    bookkeeping, producing attention shape errors when the same in-memory model
+    is used for inference right after training (as the sweep runner does).
+    Deleting the instance attribute restores the class ``forward``.
+    """
+    stack = [model]
+    seen: set[int] = set()
+    while stack:
+        m = stack.pop()
+        if not isinstance(m, torch.nn.Module) or id(m) in seen:
+            continue
+        seen.add(id(m))
+        if "forward" in m.__dict__:
+            del m.__dict__["forward"]
+        for attr in ("base_model", "model", "language_model"):
+            child = getattr(m, attr, None)
+            if child is not None:
+                stack.append(child)
+
+
 def run(cfg: RunConfig, return_model: bool = False):
     """Execute a full SFT run.
 
@@ -150,6 +177,10 @@ def run(cfg: RunConfig, return_model: bool = False):
     trainer.add_callback(VramCallback())
 
     trainer.train()
+
+    # Training-only forward patches must not leak into inference (sweep eval).
+    _strip_instance_forward_patches(model)
+    model.config.use_cache = True
 
     adapter_dir = run_dir / "adapter"
     trainer.save_model(str(adapter_dir))
