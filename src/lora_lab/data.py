@@ -120,6 +120,39 @@ def _build_cord(data_cfg: DataConfig):
     return train, eval_
 
 
+@register_dataset("synthetic_invoices")
+def _build_synthetic_invoices(data_cfg: DataConfig):
+    """Locally generated receipts (see ``synthetic.py``) - no downloads needed.
+
+    Train and eval use disjoint seed ranges so there is no leakage. Sizes come
+    from ``max_train_samples`` / ``max_eval_samples`` (with small defaults).
+    """
+    from .synthetic import generate_invoice
+
+    n_train = data_cfg.max_train_samples or 256
+    n_eval = data_cfg.max_eval_samples or 64
+
+    class _SyntheticDataset:
+        """Sequence of lazily generated samples (datasets.Dataset not needed:
+        the trainer/eval only require __len__ and __getitem__)."""
+
+        def __init__(self, start: int, n: int):
+            self.start = start
+            self.n = n
+
+        def __len__(self) -> int:
+            return self.n
+
+        def __getitem__(self, idx: int) -> dict:
+            if isinstance(idx, slice):
+                return [self[i] for i in range(*idx.indices(self.n))]
+            if not -self.n <= idx < self.n:
+                raise IndexError(idx)
+            return generate_invoice(self.start + (idx % self.n))
+
+    return _SyntheticDataset(0, n_train), _SyntheticDataset(1_000_000, n_eval)
+
+
 # --------------------------------------------------------------------------- #
 # Collator: turns a list of {image, target_json} into a masked, batched tensor.
 # --------------------------------------------------------------------------- #

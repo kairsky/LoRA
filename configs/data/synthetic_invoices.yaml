@@ -1,0 +1,25 @@
+# Synthetic receipts generated locally (src/lora_lab/synthetic.py).
+# Zero downloads: proves the dataset registry scales beyond CORD and gives a
+# controllable, offline-friendly domain (vendor/date on top of line items).
+type: synthetic_invoices
+dataset_id: null
+schema_fields:
+  - vendor
+  - date
+  - items          # list of {name, count, price}
+  - subtotal
+  - tax
+  - total
+json_schema: configs/data/synthetic_invoices_schema.json
+instruction: >-
+  You are a receipt parser. Extract the requested fields from the receipt image
+  and return STRICT, minified JSON with exactly these top-level keys:
+  vendor, date (YYYY-MM-DD), items (list of items with name, count, price),
+  subtotal, tax, total.
+  Output ONLY the JSON object, no explanations, no markdown fences.
+max_seq_len: 2048
+image_max_pixels: 1048576
+train_split: train
+eval_split: validation
+max_train_samples: 256
+max_eval_samples: 64

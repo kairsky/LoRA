@@ -69,6 +69,9 @@ python scripts/01_prepare_data.py --data configs/data/cord.yaml --n 3
 # Быстрый smoke-прогон всего пайплайна на крошечной модели (несколько шагов)
 python scripts/02_train.py --smoke
 
+# То же, но на синтетических чеках (генерируются локально, без скачиваний)
+python scripts/02_train.py --smoke --data configs/data/synthetic_invoices.yaml
+
 # Полное обучение на Qwen3.5-9B
 python scripts/02_train.py `
   --model configs/model/qwen3_5_9b_mm_qlora.yaml `
@@ -159,6 +162,8 @@ python -m pytest tests -q
 
 - **Модель**: `name_or_path` + `modality` (tiny VLM <-> Qwen3.5-9B <-> любая VLM).
 - **Датасет**: новый билдер в `data.py` + `@register_dataset(...)` + JSON-схема в `configs/data/`.
+  Рабочий пример второго домена — `synthetic_invoices` (`src/lora_lab/synthetic.py`):
+  чеки рендерятся локально через PIL, оффлайн и полностью тестируемо на CPU.
 - **Метод**: сегодня SFT (LoRA/QLoRA); DPO/ORPO (TRL) — как альтернативный оркестратор.
 - **Квантизация**: `nf4 / fp4 / без` через `quant.load_in_4bit`.
 - **Железо**: один GPU -> `accelerate`/DeepSpeed для мультиGPU без правок кода.

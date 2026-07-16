@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SyntheticInvoice",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["vendor", "date", "items", "subtotal", "tax", "total"],
+  "properties": {
+    "vendor": { "type": "string", "description": "store name printed at the top" },
+    "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "items": {
+      "type": "array",
+      "description": "line items on the receipt",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "count", "price"],
+        "properties": {
+          "name": { "type": "string" },
+          "count": { "type": "string" },
+          "price": { "type": "string" }
+        }
+      }
+    },
+    "subtotal": { "type": "string", "description": "sum of line prices" },
+    "tax": { "type": "string", "description": "tax amount" },
+    "total": { "type": "string", "description": "grand total amount" }
+  }
+}
