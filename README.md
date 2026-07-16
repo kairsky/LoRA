@@ -11,11 +11,12 @@ Config-driven пет-проект для глубокого изучения **L
 ## Структура
 
 ```
-configs/            # декларативные конфиги (model / data / train)
-src/lora_lab/       # ядро: config, data, model, modules_discovery, train, eval, infer, merge
-scripts/            # 00_env_check, 01_prepare_data, 02_train, 03_evaluate
+configs/            # декларативные конфиги (model / data / train / sweep)
+src/lora_lab/       # ядро: config, data, model, train, eval, dpo, infer, merge, ...
+scripts/            # 00 env_check ... 08 export + full_run.ps1 (весь цикл 9B)
 notebooks/          # explore_lora_internals.ipynb — заглянуть внутрь адаптации
 outputs/            # артефакты запусков (в .gitignore)
+.github/workflows/  # CI: ruff + pytest на каждый push
 ```
 
 Ключевые слои и их контракты:
@@ -27,8 +28,12 @@ outputs/            # артефакты запусков (в .gitignore)
 | `data.py` | chat template, маска `-100`, мультимодальный collator |
 | `modules_discovery.py` | авто-поиск `target_modules` внутри LM (MoE/attention) |
 | `model.py` | `BitsAndBytesConfig` (NF4) + PEFT + заморозка vision |
-| `train.py` | оркестрация TRL `SFTTrainer` + VRAM-коллбэк |
-| `eval.py` | JSON-valid %, field-level F1, exact-match |
+| `train.py` | оркестрация TRL `SFTTrainer` + VRAM/gen-eval коллбэки + resume |
+| `eval.py` | JSON-valid %, schema-valid %, field-level F1, exact-match, per-field |
+| `schema.py` / `constrained.py` | JSON Schema как контракт / grammar-constrained decoding |
+| `sweep.py` | оси sweep'ов: `grid` (произведение) x `variants` (методы) |
+| `synthetic.py` | локальный генератор чеков (второй домен, оффлайн) |
+| `pairs.py` / `dpo.py` | preference-пары и DPO-стадия поверх SFT |
 | `infer.py` / `merge.py` | инференс с адаптером / слияние адаптера |
 
 ## Установка (RTX 5090 / Blackwell / sm_120)
@@ -83,6 +88,9 @@ python scripts/02_train.py --resume outputs/<run_id>
 
 # Оценка: baseline (без адаптера) vs адаптер на одном тест-сете
 python scripts/03_evaluate.py --adapter outputs/<run_id>/adapter --limit 100
+
+# Либо весь цикл 9B одной командой (env check -> train -> eval, ~часы на 5090)
+.\scripts\full_run.ps1
 ```
 
 Переопределение любых полей конфига на лету:
@@ -90,6 +98,26 @@ python scripts/03_evaluate.py --adapter outputs/<run_id>/adapter --limit 100
 ```powershell
 python scripts/02_train.py --set model.lora.r=32 model.lora.lora_alpha=64 train.max_steps=200
 ```
+
+## Результаты: baseline vs QLoRA-адаптер (Qwen3.5-9B, CORD)
+
+Итоговая цель проекта — этот замер. Воспроизводится одной командой
+(`.\scripts\full_run.ps1`, метрики падают в `outputs/eval_9b/metrics.json`);
+обе строки считаются на одном и том же held-out срезе CORD (limit 100).
+
+| Метрика | Baseline (без адаптера) | QLoRA-адаптер | Delta |
+|---|---|---|---|
+| `json_valid_rate` | — | — | — |
+| `schema_valid_rate` | — | — | — |
+| `field_f1` | — | — | — |
+| `exact_match` | — | — | — |
+
+> Таблица заполняется из `outputs/eval_9b/metrics.json` после полного прогона.
+> Ориентиры длительности на RTX 5090: обучение 3 эпохи CORD ~ несколько часов,
+> eval на 100 сэмплах ~ десятки минут. Прерванный прогон продолжается через
+> `python scripts/02_train.py --resume outputs/<run_id>`, прогресс виден в
+> TensorBoard (`tensorboard --logdir outputs`), включая `gen_json_valid_rate`
+> во время обучения.
 
 ## Продвинутые возможности
 
