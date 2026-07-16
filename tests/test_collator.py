@@ -10,12 +10,25 @@ from fakes import FakeImage, FakeProcessor
 from lora_lab.data import IGNORE_INDEX, MultimodalJSONCollator
 
 
-def _collator():
+class CountingProcessor(FakeProcessor):
+    """FakeProcessor that counts how many times images get (re)processed."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        return super().__call__(*args, **kwargs)
+
+
+def _collator(processor=None, **kwargs):
     return MultimodalJSONCollator(
-        processor=FakeProcessor(),
+        processor=processor or FakeProcessor(),
         instruction="extract fields",
         max_seq_len=128,
         image_max_pixels=10_000,
+        **kwargs,
     )
 
 
@@ -84,3 +97,30 @@ def test_vision_tensors_concatenated():
     )
     # Two images -> pixel patches concatenated along dim 0; grid has 2 rows.
     assert batch["image_grid_thw"].shape[0] == 2
+
+
+def test_prompt_len_cache_reduces_processor_calls():
+    proc = CountingProcessor()
+    collator = _collator(processor=proc)
+    features = [
+        {"image": FakeImage(), "target_json": '{"a":"1"}'},
+        {"image": FakeImage(), "target_json": '{"b":"2"}'},
+    ]
+    collator(features)
+    # 2 full encodes + 1 prompt encode (2nd sample hits the per-size cache).
+    assert proc.calls == 3
+    collator(features)
+    # "Next epoch": prompt length is cached, only the 2 full encodes remain.
+    assert proc.calls == 5
+
+
+def test_prompt_len_cache_does_not_change_labels():
+    features = [
+        {"image": FakeImage(), "target_json": '{"a":"1"}'},
+        {"image": FakeImage(), "target_json": '{"b":"2 3"}'},
+    ]
+    cached = _collator(cache_prompt_len=True)(features)
+    uncached = _collator(cache_prompt_len=False)(features)
+    assert (cached["labels"] == uncached["labels"]).all()
+    assert (cached["input_ids"] == uncached["input_ids"]).all()
+    assert (cached["mm_token_type_ids"] == uncached["mm_token_type_ids"]).all()

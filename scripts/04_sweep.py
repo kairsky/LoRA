@@ -33,7 +33,7 @@ def _expand_grid(grid: dict[str, list]) -> list[dict]:
         return [{}]
     keys = list(grid.keys())
     combos = itertools.product(*[grid[k] for k in keys])
-    return [dict(zip(keys, values)) for values in combos]
+    return [dict(zip(keys, values, strict=True)) for values in combos]
 
 
 def main() -> int:
@@ -107,7 +107,9 @@ def main() -> int:
     print(f"\n[sweep] done. Results -> {csv_path}\n")
     # Pretty console table sorted by field_f1.
     for row in sorted(rows, key=lambda r: r["field_f1"], reverse=True):
-        keys = " ".join(f"{k.split('.')[-1]}={combo_v}" for k, combo_v in zip(grid_keys, [row[k.split('.')[-1]] for k in grid_keys]))
+        keys = " ".join(
+            f"{k.split('.')[-1]}={row[k.split('.')[-1]]}" for k in grid_keys
+        )
         print(f"  {keys:40s} f1={row['field_f1']:.4f} em={row['exact_match']:.4f}")
     return 0
 

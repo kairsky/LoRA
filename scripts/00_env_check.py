@@ -50,7 +50,7 @@ class CheckState:
 def check_python(state: CheckState) -> None:
     print("\n== Python / OS ==")
     state.ok(f"Python {platform.python_version()} on {platform.system()} {platform.release()}")
-    if sys.version_info < (3, 11):
+    if sys.version_info < (3, 11):  # noqa: UP036 - runtime guard, not dead code
         state.fail(f"Python >=3.11 required, found {platform.python_version()}")
 
 

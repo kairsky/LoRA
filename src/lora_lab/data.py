@@ -17,7 +17,7 @@ to generate. Image/prompt/thinking tokens never contribute to the loss.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -130,6 +130,14 @@ class MultimodalJSONCollator:
     max_seq_len: int = 2048
     image_max_pixels: int | None = 1_048_576
     train: bool = True
+    # The prompt (image placeholder + fixed instruction) tokenizes to the same
+    # length for every image of the same post-downscale size, so its length is
+    # cached per (w, h). This halves processor work: without the cache every
+    # sample costs TWO full processor passes (full text + prompt) per epoch.
+    cache_prompt_len: bool = True
+    _prompt_len_cache: dict[tuple[int, int], int] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def _messages(self, target_json: str | None) -> list[dict[str, Any]]:
         user = {
@@ -144,26 +152,25 @@ class MultimodalJSONCollator:
             msgs.append({"role": "assistant", "content": [{"type": "text", "text": target_json}]})
         return msgs
 
-    def _encode_one(self, image: Image.Image, target_json: str):
-        image = _downscale(image.convert("RGB"), self.image_max_pixels)
+    def _prompt_len(self, image: Image.Image) -> int:
+        """Length of the (image-expanded) prompt in tokens.
 
-        # Full conversation text (prompt + assistant answer).
-        full_text = self.processor.apply_chat_template(
-            self._messages(target_json), tokenize=False, add_generation_prompt=False
-        )
-        # Prompt-only text (up to where the assistant should start generating).
+        Only the *length* of the prompt encoding is ever needed (to place the
+        label mask), and it depends solely on the post-downscale image size:
+        the instruction text is fixed and the number of image tokens is a
+        function of the image grid, not the pixel content. Cache it per size.
+        """
+        size_key = (int(image.size[0]), int(image.size[1]))
+        if self.cache_prompt_len:
+            cached = self._prompt_len_cache.get(size_key)
+            if cached is not None:
+                return cached
+
+        # Prompt-only text (up to where the assistant should start generating),
+        # encoded with the SAME image so the placeholder expands identically.
         prompt_text = self.processor.apply_chat_template(
             self._messages(None), tokenize=False, add_generation_prompt=True
         )
-
-        full = self.processor(
-            text=[full_text],
-            images=[image],
-            return_tensors="pt",
-            max_length=self.max_seq_len,
-            truncation=True,
-        )
-        # Encode the prompt with the SAME image to get the (image-expanded) prompt length.
         prompt = self.processor(
             text=[prompt_text],
             images=[image],
@@ -171,10 +178,28 @@ class MultimodalJSONCollator:
             max_length=self.max_seq_len,
             truncation=True,
         )
+        prompt_len = int(prompt["input_ids"].shape[1])
+        if self.cache_prompt_len:
+            self._prompt_len_cache[size_key] = prompt_len
+        return prompt_len
+
+    def _encode_one(self, image: Image.Image, target_json: str):
+        image = _downscale(image.convert("RGB"), self.image_max_pixels)
+
+        # Full conversation text (prompt + assistant answer).
+        full_text = self.processor.apply_chat_template(
+            self._messages(target_json), tokenize=False, add_generation_prompt=False
+        )
+        full = self.processor(
+            text=[full_text],
+            images=[image],
+            return_tensors="pt",
+            max_length=self.max_seq_len,
+            truncation=True,
+        )
 
         input_ids = full["input_ids"][0]
-        prompt_len = int(prompt["input_ids"].shape[1])
-        prompt_len = min(prompt_len, input_ids.shape[0])
+        prompt_len = min(self._prompt_len(image), input_ids.shape[0])
 
         labels = input_ids.clone()
         labels[:prompt_len] = IGNORE_INDEX  # mask image + prompt tokens

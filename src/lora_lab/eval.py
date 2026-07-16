@@ -200,7 +200,7 @@ def evaluate(
                 data_cfg,
                 logits_processor=logits_processor,
             )
-            for offset, (raw, gold) in enumerate(zip(raws, golds)):
+            for offset, (raw, gold) in enumerate(zip(raws, golds, strict=True)):
                 pred = extract_json(raw)
                 is_valid = pred is not None
                 is_schema_valid = is_valid and validate_json(pred, schema)
