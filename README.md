@@ -129,14 +129,21 @@ tensorboard --logdir outputs
 `exact_match` и **per-field** precision/recall/F1, батчит генерацию (`--batch-size`),
 нормализует числа при сравнении и пишет `predictions_*.jsonl` + `metrics.json` (`--out`).
 
-### Sweeps по гиперпараметрам
+### Sweeps по гиперпараметрам и аблэйшены методов
 
 ```powershell
-python scripts/04_sweep.py --sweep configs/sweep/lora_rank.yaml
+python scripts/04_sweep.py --sweep configs/sweep/lora_rank.yaml       # сетка r x alpha
+python scripts/04_sweep.py --sweep configs/sweep/methods.yaml        # LoRA vs DoRA vs rsLoRA vs PiSSA vs LoRA+
+python scripts/04_sweep.py --sweep configs/sweep/quant.yaml          # QLoRA (NF4) vs bf16 LoRA
+python scripts/04_sweep.py --sweep configs/sweep/target_modules.yaml # attention-only vs MLP-only vs все
 ```
 
-Перебирает сетку (`r`, `alpha`, ...), обучает+оценивает каждую комбинацию и складывает
-таблицу в `outputs/sweeps/<name>/results.csv`.
+Два вида осей: `grid` (декартово произведение числовых параметров) и `variants`
+(взаимоисключающие тумблеры методов). Каждая комбинация обучается+оценивается,
+таблица складывается в `outputs/sweeps/<name>/results.csv`.
+
+Аблэйшен `target_modules` работает через `model.lora.target_groups: all|attention|mlp`
+(фильтр в `modules_discovery.py`) — доступен и в обычном обучении через `--set`.
 
 ### Тесты
 
@@ -159,4 +166,7 @@ python -m pytest tests -q
 ## Что изучить руками
 
 Открой `notebooks/explore_lora_internals.ipynb`: разложение `dW = (alpha/r) * B @ A`,
-доля обучаемых параметров (<1%), куда именно вешаются адаптеры в MoE, влияние `r`/`alpha`.
+доля обучаемых параметров (<1%), куда именно вешаются адаптеры в MoE, влияние `r`/`alpha`,
+а после обучения — SVD-анализ реального адаптера: какие слои изменились сильнее всего
+(attention vs MLP/эксперты) и сколько сингулярных компонент реально несут энергию
+(хватило бы меньшего `r`?).

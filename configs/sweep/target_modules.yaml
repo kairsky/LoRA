@@ -1,0 +1,28 @@
+# Where do adapters matter most: attention linears, MLP/expert linears, or
+# everything? Classic LoRA ablation (the original paper adapts attention only;
+# later work shows MLP often matters more).
+name: target_modules
+model: configs/model/tiny_mm_smoke.yaml
+data: configs/data/cord.yaml
+train: configs/train/sft_qlora.yaml
+
+fixed:
+  train.max_steps: 30
+  train.logging_steps: 5
+  train.save_steps: 30
+  train.eval_strategy: "no"
+  train.gen_eval_steps: 0
+  data.max_train_samples: 64
+  data.max_eval_samples: 32
+
+variants:
+  - label: all
+    model.lora.target_groups: all
+  - label: attention_only
+    model.lora.target_groups: attention
+  - label: mlp_only
+    model.lora.target_groups: mlp
+
+eval:
+  limit: 32
+  batch_size: 4

@@ -45,6 +45,9 @@ class LoraConfigModel(BaseModel):
     lora_dropout: float = 0.05
     bias: Literal["none", "all", "lora_only"] = "none"
     target_modules: list[str] | Literal["auto"] = "auto"
+    # Ablation lever for target_modules="auto": adapt everything, only the
+    # attention linears, or only the MLP/expert linears.
+    target_groups: Literal["all", "attention", "mlp"] = "all"
     modules_to_save: list[str] = Field(default_factory=list)
     task_type: str = "CAUSAL_LM"
     use_dora: bool = False

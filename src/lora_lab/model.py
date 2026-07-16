@@ -106,12 +106,18 @@ def build_model(model_cfg: ModelConfig, verbose: bool = True):
 
     # Resolve LoRA target modules.
     if model_cfg.lora.target_modules == "auto":
-        targets = find_lora_targets(model)
+        targets = find_lora_targets(model, group=model_cfg.lora.target_groups)
         if verbose:
             print("\n[model] linear layer tree (LoRA injection points):")
             print_linear_tree(model)
-            print(f"\n[model] auto target_modules: {targets}")
-            print(f"[model] target match counts: {summarize_targets(model, targets)}")
+            if model_cfg.lora.target_groups != "all":
+                print(
+                    f"\n[model] auto target_modules (group={model_cfg.lora.target_groups}): "
+                    f"{len(targets)} modules"
+                )
+            else:
+                print(f"\n[model] auto target_modules: {targets}")
+                print(f"[model] target match counts: {summarize_targets(model, targets)}")
     else:
         targets = list(model_cfg.lora.target_modules)
 

@@ -1,0 +1,36 @@
+# Adaptation-method ablation on ONE metric set: vanilla LoRA vs DoRA vs
+# rank-stabilized LoRA vs PiSSA init vs LoRA+. `variants` are mutually
+# exclusive toggles (a cartesian grid would combine them nonsensically).
+#
+# Uses the tiny smoke model + few steps so the whole comparison finishes
+# quickly. Point `model` at the 9B config for a real (slow) comparison.
+name: methods
+model: configs/model/tiny_mm_smoke.yaml
+data: configs/data/cord.yaml
+train: configs/train/sft_qlora.yaml
+
+fixed:
+  model.lora.r: 16
+  model.lora.lora_alpha: 32
+  train.max_steps: 30
+  train.logging_steps: 5
+  train.save_steps: 30
+  train.eval_strategy: "no"
+  train.gen_eval_steps: 0
+  data.max_train_samples: 64
+  data.max_eval_samples: 32
+
+variants:
+  - label: lora
+  - label: dora
+    model.lora.use_dora: true
+  - label: rslora
+    model.lora.use_rslora: true
+  - label: pissa
+    model.lora.init_lora_weights: pissa
+  - label: lora_plus
+    model.lora.lora_plus_lr_ratio: 16
+
+eval:
+  limit: 32
+  batch_size: 4

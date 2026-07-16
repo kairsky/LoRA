@@ -39,6 +39,15 @@ DEFAULT_EXCLUDE = (
 # Linear-like layer class names, including bitsandbytes' 4-bit/8-bit variants.
 _LINEAR_CLASSNAMES = ("Linear", "Linear4bit", "Linear8bitLt", "Params4bit")
 
+# Ablation groups: restrict LoRA to a functional slice of the LM. Substrings are
+# matched against the FULL module path (covers Qwen dense, MoE experts and the
+# hybrid DeltaNet/attention naming).
+GROUP_INCLUDES: dict[str, tuple[str, ...] | None] = {
+    "all": None,
+    "attention": ("attn", "attention", "linear_attn"),
+    "mlp": ("mlp", "expert", "feed_forward", "ffn"),
+}
+
 
 def _is_linear(module: nn.Module) -> bool:
     if isinstance(module, nn.Linear):
@@ -50,13 +59,22 @@ def find_lora_targets(
     model: nn.Module,
     include: tuple[str, ...] | None = None,
     exclude: tuple[str, ...] = DEFAULT_EXCLUDE,
+    group: str = "all",
 ) -> list[str]:
-    """Return unique leaf-linear suffix names suitable for ``LoraConfig.target_modules``.
+    """Return module names suitable for ``LoraConfig.target_modules``.
 
-    ``include``: if given, keep only modules whose full name contains one of these
-    substrings (e.g. restrict to attention only).
+    ``group``: one of ``GROUP_INCLUDES`` ("all" / "attention" / "mlp") for
+    ablations. ``include``: explicit substrings, overrides ``group``.
+
+    Unrestricted discovery returns unique *suffix* names (PEFT matches the last
+    dotted component). When a restriction applies, FULL module paths are
+    returned instead: a suffix like ``gate_proj`` can exist in both attention
+    and MLP blocks, and suffix matching would silently re-broaden the ablation.
     """
-    suffixes: set[str] = set()
+    if include is None:
+        include = GROUP_INCLUDES[group]
+
+    names: set[str] = set()
     for name, module in model.named_modules():
         if not _is_linear(module):
             continue
@@ -64,12 +82,12 @@ def find_lora_targets(
             continue
         if include and not any(good in name for good in include):
             continue
-        # PEFT matches on the last dotted component (the layer's local name).
         suffix = name.split(".")[-1]
         # Skip purely numeric names (e.g. ModuleList indices).
-        if suffix and not suffix.isdigit():
-            suffixes.add(suffix)
-    return sorted(suffixes)
+        if not suffix or suffix.isdigit():
+            continue
+        names.add(name if include else suffix)
+    return sorted(names)
 
 
 def summarize_targets(model: nn.Module, targets: list[str]) -> dict[str, int]:

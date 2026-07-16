@@ -1,0 +1,28 @@
+# How much quality does 4-bit quantization cost? QLoRA (NF4) vs plain
+# bf16 LoRA on the same data/steps. Watch vram_peak_gb in the logs too -
+# that is the whole point of QLoRA.
+name: quant
+model: configs/model/tiny_mm_smoke.yaml
+data: configs/data/cord.yaml
+train: configs/train/sft_qlora.yaml
+
+fixed:
+  train.max_steps: 30
+  train.logging_steps: 5
+  train.save_steps: 30
+  train.eval_strategy: "no"
+  train.gen_eval_steps: 0
+  data.max_train_samples: 64
+  data.max_eval_samples: 32
+
+variants:
+  - label: qlora_nf4
+    model.quant.load_in_4bit: true
+  - label: lora_bf16
+    model.quant.load_in_4bit: false
+    # paged 8-bit optimizer is a bitsandbytes/QLoRA thing; use plain AdamW here
+    train.optim: adamw_torch
+
+eval:
+  limit: 32
+  batch_size: 4

@@ -1,18 +1,23 @@
 """Hyper-parameter sweep runner.
 
-Trains + evaluates the cartesian product of a grid of config overrides and
-writes a comparison table. Great for building intuition about how LoRA `r`,
-`lora_alpha`, learning rate, DoRA/rsLoRA, etc. affect the metrics.
+Trains + evaluates every combination from a sweep YAML and writes a comparison
+table. Two axes compose:
 
-Example:
+  grid:     cartesian product of numeric axes (r, alpha, lr, ...)
+  variants: mutually exclusive method toggles (LoRA vs DoRA vs rsLoRA vs
+            PiSSA ...) - each entry is a dict of dotted overrides + a "label"
+
+Examples:
     python scripts/04_sweep.py --sweep configs/sweep/lora_rank.yaml
+    python scripts/04_sweep.py --sweep configs/sweep/methods.yaml
+    python scripts/04_sweep.py --sweep configs/sweep/quant.yaml
+    python scripts/04_sweep.py --sweep configs/sweep/target_modules.yaml
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import itertools
 import json
 import sys
 from pathlib import Path
@@ -24,16 +29,10 @@ import lora_lab.data  # noqa: E402, F401  (registers "cord")
 from lora_lab.config import _load_yaml, load_run_config  # noqa: E402
 from lora_lab.data import build_dataset  # noqa: E402
 from lora_lab.eval import evaluate  # noqa: E402
+from lora_lab.sweep import expand_runs  # noqa: E402
 from lora_lab.train import run  # noqa: E402
 
-
-def _expand_grid(grid: dict[str, list]) -> list[dict]:
-    """Cartesian product of {key: [values]} -> list of {key: value} dicts."""
-    if not grid:
-        return [{}]
-    keys = list(grid.keys())
-    combos = itertools.product(*[grid[k] for k in keys])
-    return [dict(zip(keys, values, strict=True)) for values in combos]
+METRIC_COLUMNS = ("field_f1", "exact_match", "json_valid_rate", "schema_valid_rate")
 
 
 def main() -> int:
@@ -47,19 +46,21 @@ def main() -> int:
     name = spec.get("name", "sweep")
     fixed = spec.get("fixed", {})
     grid = spec.get("grid", {})
+    variants = spec.get("variants", [])
     eval_cfg = spec.get("eval", {})
-    combos = _expand_grid(grid)
+    runs = expand_runs(grid, variants)
 
     out_dir = ROOT / "outputs" / "sweeps" / name
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[sweep] {name}: {len(combos)} runs -> {out_dir}")
+    print(f"[sweep] {name}: {len(runs)} runs -> {out_dir}")
 
     rows: list[dict] = []
     grid_keys = list(grid.keys())
-    for idx, combo in enumerate(combos, 1):
+    for idx, (label, combo) in enumerate(runs, 1):
         overrides = {**fixed, **combo}
         cfg = load_run_config(spec["model"], spec["data"], spec["train"], overrides=overrides)
-        print(f"\n[sweep] run {idx}/{len(combos)}: {combo}")
+        tag = f"{label}: {combo}" if label else f"{combo}"
+        print(f"\n[sweep] run {idx}/{len(runs)}: {tag}")
 
         adapter_dir, model, processor = run(cfg, return_model=True)
         _, eval_ds, _tc, _ec = build_dataset(cfg.data, processor)
@@ -72,16 +73,12 @@ def main() -> int:
             batch_size=eval_cfg.get("batch_size", 4),
         )
 
-        row = {k.split(".")[-1]: v for k, v in combo.items()}
-        row.update(
-            {
-                "run_id": cfg.run_id,
-                "json_valid_rate": metrics["json_valid_rate"],
-                "schema_valid_rate": metrics["schema_valid_rate"],
-                "field_f1": metrics["field_f1"],
-                "exact_match": metrics["exact_match"],
-            }
-        )
+        row: dict = {}
+        if variants:
+            row["variant"] = label
+        row.update({k.split(".")[-1]: v for k, v in combo.items() if k in grid_keys})
+        row.update({m: metrics[m] for m in METRIC_COLUMNS})
+        row["run_id"] = cfg.run_id
         rows.append(row)
         print(f"[sweep] -> {json.dumps({k: row[k] for k in ('field_f1', 'exact_match')})}")
 
@@ -91,13 +88,8 @@ def main() -> int:
             torch.cuda.empty_cache()
 
     # Write results table.
-    fieldnames = [k.split(".")[-1] for k in grid_keys] + [
-        "field_f1",
-        "exact_match",
-        "json_valid_rate",
-        "schema_valid_rate",
-        "run_id",
-    ]
+    fieldnames = (["variant"] if variants else []) + [k.split(".")[-1] for k in grid_keys]
+    fieldnames += list(METRIC_COLUMNS) + ["run_id"]
     csv_path = out_dir / "results.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
@@ -106,11 +98,10 @@ def main() -> int:
 
     print(f"\n[sweep] done. Results -> {csv_path}\n")
     # Pretty console table sorted by field_f1.
+    axis_cols = fieldnames[: len(fieldnames) - len(METRIC_COLUMNS) - 1]
     for row in sorted(rows, key=lambda r: r["field_f1"], reverse=True):
-        keys = " ".join(
-            f"{k.split('.')[-1]}={row[k.split('.')[-1]]}" for k in grid_keys
-        )
-        print(f"  {keys:40s} f1={row['field_f1']:.4f} em={row['exact_match']:.4f}")
+        keys = " ".join(f"{c}={row[c]}" for c in axis_cols)
+        print(f"  {keys:44s} f1={row['field_f1']:.4f} em={row['exact_match']:.4f}")
     return 0
 
 
