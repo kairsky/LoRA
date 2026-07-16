@@ -1,10 +1,12 @@
 """TRL's SFTTrainer leaves a training-only ``forward`` monkey-patch on the model;
-``_strip_instance_forward_patches`` must remove it (and be a no-op otherwise)."""
+``_strip_instance_forward_patches`` must remove it (and be a no-op otherwise).
+``_forward_patches_removed`` must remove it only temporarily (mid-training
+generation) and restore it afterwards."""
 
 import torch
 import torch.nn as nn
 
-from lora_lab.train import _strip_instance_forward_patches
+from lora_lab.train import _forward_patches_removed, _strip_instance_forward_patches
 
 
 class Inner(nn.Module):
@@ -39,3 +41,28 @@ def test_strip_is_noop_on_clean_model():
     _strip_instance_forward_patches(outer)
     _strip_instance_forward_patches(outer)  # idempotent
     assert outer(torch.tensor(1)).item() == 2
+
+
+def test_context_manager_restores_patches():
+    outer = Outer()
+    outer.forward = lambda x: "patched-outer"
+    outer.model.forward = lambda x: "patched-inner"
+
+    with _forward_patches_removed(outer):
+        # Inside: real class forwards are active (generation would work).
+        assert outer(torch.tensor(1)).item() == 2
+
+    # Outside: TRL's training patch is back in place.
+    assert outer(torch.tensor(1)) == "patched-outer"
+    assert outer.model(torch.tensor(1)) == "patched-inner"
+
+
+def test_context_manager_restores_even_on_error():
+    outer = Outer()
+    outer.forward = lambda x: "patched-outer"
+    try:
+        with _forward_patches_removed(outer):
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    assert outer(torch.tensor(1)) == "patched-outer"

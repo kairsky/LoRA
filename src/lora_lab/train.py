@@ -9,6 +9,7 @@ defensively so this keeps working on the fast-moving bleeding edge.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -32,6 +33,86 @@ class VramCallback(TrainerCallback):
             torch.cuda.reset_peak_memory_stats()
 
 
+class GenEvalCallback(TrainerCallback):
+    """Generation-based metrics DURING training.
+
+    Trainer eval only shows the loss; it cannot tell you *when* the model
+    starts emitting valid JSON. Every ``every_steps`` this callback generates
+    on a small eval slice and logs ``gen_json_valid_rate`` / ``gen_field_f1``
+    etc. alongside the training loss (TensorBoard picks them up too).
+    """
+
+    def __init__(self, processor, eval_ds, data_cfg, every_steps, n_samples, batch_size):
+        self.processor = processor
+        self.eval_ds = eval_ds
+        self.data_cfg = data_cfg
+        self.every_steps = every_steps
+        self.n_samples = n_samples
+        self.batch_size = batch_size
+        self.trainer = None  # set via attach() so metrics land in log_history
+
+    def attach(self, trainer) -> GenEvalCallback:
+        self.trainer = trainer
+        return self
+
+    def on_step_end(self, args, state, control, model=None, **kwargs):
+        if self.every_steps <= 0 or model is None or state.global_step == 0:
+            return
+        if state.global_step % self.every_steps != 0:
+            return
+        from .eval import evaluate
+
+        was_training = model.training
+        use_cache = getattr(model.config, "use_cache", None)
+        try:
+            # TRL patches ``forward`` for training; generate() needs the real one.
+            with _forward_patches_removed(model):
+                model.config.use_cache = True
+                metrics = evaluate(
+                    model,
+                    self.processor,
+                    self.eval_ds,
+                    self.data_cfg,
+                    limit=self.n_samples,
+                    batch_size=self.batch_size,
+                )
+        except Exception as exc:  # noqa: BLE001 - never kill a long run over metrics
+            print(f"[gen-eval] skipped at step {state.global_step}: {exc}")
+            return
+        finally:
+            if use_cache is not None:
+                model.config.use_cache = use_cache
+            if was_training:
+                model.train()
+
+        payload = {
+            f"gen_{k}": float(v)
+            for k, v in metrics.items()
+            if isinstance(v, (int, float)) and k != "n"
+        }
+        if self.trainer is not None:
+            self.trainer.log(payload)
+        else:
+            print(f"[gen-eval] step {state.global_step}: {payload}")
+
+
+def _available_reporters(requested: list[str]) -> list[str]:
+    """Drop reporters whose backend is not importable instead of crashing."""
+    importable = {"tensorboard": "tensorboard", "wandb": "wandb", "trackio": "trackio"}
+    kept = []
+    for name in requested:
+        mod = importable.get(name)
+        if mod is None:
+            kept.append(name)
+            continue
+        try:
+            __import__(mod)
+            kept.append(name)
+        except ImportError:
+            print(f"[train] report_to '{name}' requested but not installed; skipping")
+    return kept
+
+
 def _build_sft_config(cfg: RunConfig, run_dir: Path):
     """Construct an SFTConfig (preferred) or fall back to TrainingArguments."""
     common = dict(
@@ -50,10 +131,16 @@ def _build_sft_config(cfg: RunConfig, run_dir: Path):
         bf16=cfg.train.bf16,
         fp16=cfg.train.fp16,
         logging_steps=cfg.train.logging_steps,
+        eval_strategy=cfg.train.eval_strategy,
+        eval_steps=cfg.train.eval_steps,
         save_steps=cfg.train.save_steps,
         save_total_limit=cfg.train.save_total_limit,
+        load_best_model_at_end=(
+            cfg.train.load_best_model_at_end and cfg.train.eval_strategy != "no"
+        ),
+        metric_for_best_model=cfg.train.metric_for_best_model,
         dataloader_num_workers=cfg.train.dataloader_num_workers,
-        report_to=cfg.train.report_to,
+        report_to=_available_reporters(cfg.train.report_to),
         seed=cfg.train.seed,
         gradient_checkpointing=cfg.model.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False},
@@ -125,6 +212,22 @@ def _build_trainer(model, args, train_ds, eval_ds, collator, processor, optimize
         return Trainer(**kwargs)
 
 
+def _iter_wrapped_modules(model):
+    """Yield the model and the usual wrapper chain (PEFT/VLM) exactly once each."""
+    stack = [model]
+    seen: set[int] = set()
+    while stack:
+        m = stack.pop()
+        if not isinstance(m, torch.nn.Module) or id(m) in seen:
+            continue
+        seen.add(id(m))
+        yield m
+        for attr in ("base_model", "model", "language_model"):
+            child = getattr(m, attr, None)
+            if child is not None:
+                stack.append(child)
+
+
 def _strip_instance_forward_patches(model) -> None:
     """Remove instance-level ``forward`` overrides left behind by the trainer.
 
@@ -137,33 +240,46 @@ def _strip_instance_forward_patches(model) -> None:
     is used for inference right after training (as the sweep runner does).
     Deleting the instance attribute restores the class ``forward``.
     """
-    stack = [model]
-    seen: set[int] = set()
-    while stack:
-        m = stack.pop()
-        if not isinstance(m, torch.nn.Module) or id(m) in seen:
-            continue
-        seen.add(id(m))
+    for m in _iter_wrapped_modules(model):
         if "forward" in m.__dict__:
             del m.__dict__["forward"]
-        for attr in ("base_model", "model", "language_model"):
-            child = getattr(m, attr, None)
-            if child is not None:
-                stack.append(child)
 
 
-def run(cfg: RunConfig, return_model: bool = False):
+@contextmanager
+def _forward_patches_removed(model):
+    """Temporarily remove instance ``forward`` patches, then put them back.
+
+    Used to run ``generate()`` mid-training: TRL's patch must stay in place for
+    subsequent training steps, so unlike ``_strip_instance_forward_patches``
+    this restores everything on exit.
+    """
+    saved: list[tuple[torch.nn.Module, object]] = []
+    for m in _iter_wrapped_modules(model):
+        if "forward" in m.__dict__:
+            saved.append((m, m.__dict__["forward"]))
+            del m.__dict__["forward"]
+    try:
+        yield
+    finally:
+        for m, fwd in saved:
+            m.__dict__["forward"] = fwd
+
+
+def run(cfg: RunConfig, return_model: bool = False, resume: bool = False):
     """Execute a full SFT run.
 
-    Returns the adapter path, or ``(adapter_path, model, processor)`` when
-    ``return_model=True`` (used by the sweep runner to evaluate in-memory).
+    ``resume=True`` continues from the last checkpoint inside ``cfg.run_dir``
+    (pass the snapshotted config of the interrupted run, see
+    ``config.load_snapshot``). Returns the adapter path, or
+    ``(adapter_path, model, processor)`` when ``return_model=True`` (used by
+    the sweep runner to evaluate in-memory).
     """
     from transformers import set_seed
 
     set_seed(cfg.train.seed)
     run_dir = cfg.run_dir
     snapshot_config(cfg, run_dir)
-    print(f"[train] run_dir = {run_dir}")
+    print(f"[train] run_dir = {run_dir}" + (" (resuming)" if resume else ""))
 
     model, processor, targets = build_model(cfg.model)
     train_ds, eval_ds, train_collator, _eval_collator = build_dataset(cfg.data, processor)
@@ -175,8 +291,18 @@ def run(cfg: RunConfig, return_model: bool = False):
         model, args, train_ds, eval_ds, train_collator, processor, optimizers=optimizers
     )
     trainer.add_callback(VramCallback())
+    if cfg.train.gen_eval_steps > 0:
+        gen_cb = GenEvalCallback(
+            processor=processor,
+            eval_ds=eval_ds,
+            data_cfg=cfg.data,
+            every_steps=cfg.train.gen_eval_steps,
+            n_samples=cfg.train.gen_eval_samples,
+            batch_size=cfg.train.gen_eval_batch_size,
+        ).attach(trainer)
+        trainer.add_callback(gen_cb)
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=True if resume else None)
 
     # Training-only forward patches must not leak into inference (sweep eval).
     _strip_instance_forward_patches(model)

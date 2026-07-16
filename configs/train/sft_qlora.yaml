@@ -21,10 +21,19 @@ bf16: true
 fp16: false
 
 logging_steps: 10
+eval_strategy: steps           # loss on the eval set during training
 eval_steps: 100
-save_steps: 100
+save_steps: 100                # must stay a multiple of eval_steps for load_best
 save_total_limit: 2
+load_best_model_at_end: true   # keep the checkpoint with the lowest eval loss
+metric_for_best_model: loss
+
+# Generation-based metrics during training (json_valid_rate / field_f1 on a
+# small eval slice). Set gen_eval_steps: 0 to disable.
+gen_eval_steps: 100
+gen_eval_samples: 8
+gen_eval_batch_size: 4
 
 dataloader_num_workers: 0      # 0 is safest on native Windows
-report_to: []                  # e.g. ["tensorboard"]
+report_to: ["tensorboard"]     # skipped automatically if not installed
 seed: 42

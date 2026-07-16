@@ -103,9 +103,20 @@ class TrainConfig(BaseModel):
     bf16: bool = True
     fp16: bool = False
     logging_steps: int = 10
+    # Loss-based eval during training. "no" disables; "steps" runs every
+    # ``eval_steps`` and enables ``load_best_model_at_end``.
+    eval_strategy: Literal["no", "steps", "epoch"] = "no"
     eval_steps: int = 100
     save_steps: int = 100
     save_total_limit: int = 2
+    load_best_model_at_end: bool = False
+    metric_for_best_model: str = "loss"  # i.e. eval_loss
+    # Generation-based metrics DURING training (json_valid_rate / field_f1 on a
+    # small eval slice). 0 disables. Costs one batched generate every N steps,
+    # but shows the moment the model "clicks" into the JSON format.
+    gen_eval_steps: int = 0
+    gen_eval_samples: int = 8
+    gen_eval_batch_size: int = 4
     dataloader_num_workers: int = 0  # 0 is safest on native Windows
     report_to: list[str] = Field(default_factory=list)  # e.g. ["tensorboard"]
     seed: int = 42
@@ -162,6 +173,23 @@ def _set_dotted(d: dict[str, Any], dotted: str, value: Any) -> None:
     for k in keys[:-1]:
         node = node.setdefault(k, {})
     node[keys[-1]] = value
+
+
+def load_snapshot(path: str | Path, overrides: dict[str, Any] | None = None) -> RunConfig:
+    """Rebuild a ``RunConfig`` from a run's ``config.snapshot.yaml``.
+
+    ``path`` may be the snapshot file or the run directory containing it. The
+    snapshot stores ``run_id``, so the rebuilt config points at the SAME run
+    directory - this is what makes ``--resume`` find the checkpoints.
+    """
+    p = Path(path)
+    if p.is_dir():
+        p = p / "config.snapshot.yaml"
+    payload = _load_yaml(p)
+    if overrides:
+        for dotted, value in overrides.items():
+            _set_dotted(payload, dotted, value)
+    return RunConfig(**payload)
 
 
 def snapshot_config(cfg: RunConfig, run_dir: Path) -> Path:

@@ -9,6 +9,9 @@ Examples:
 
     # Fast pipeline smoke test on a tiny model (few steps, few samples):
     python scripts/02_train.py --smoke
+
+    # Resume an interrupted run from its last checkpoint:
+    python scripts/02_train.py --resume outputs/<run_id>
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import lora_lab.data  # noqa: E402, F401  (import registers the "cord" dataset builder)
-from lora_lab.config import load_run_config  # noqa: E402
+from lora_lab.config import load_run_config, load_snapshot  # noqa: E402
 from lora_lab.train import run  # noqa: E402
 
 
@@ -35,6 +38,13 @@ def parse_args() -> argparse.Namespace:
         "--smoke",
         action="store_true",
         help="Tiny model + few steps/samples to validate the pipeline fast.",
+    )
+    p.add_argument(
+        "--resume",
+        default=None,
+        metavar="RUN_DIR",
+        help="Resume from the last checkpoint of an existing run directory "
+        "(uses its config.snapshot.yaml; --model/--data/--train are ignored).",
     )
     p.add_argument(
         "--set",
@@ -67,13 +77,22 @@ def _parse_overrides(items: list[str]) -> dict:
 def main() -> int:
     args = parse_args()
     overrides = _parse_overrides(args.set)
+
+    if args.resume:
+        cfg = load_snapshot(args.resume, overrides=overrides)
+        run(cfg, resume=True)
+        return 0
+
     model_cfg = args.model
     if args.smoke:
         model_cfg = "configs/model/tiny_mm_smoke.yaml"
         overrides.setdefault("train.max_steps", 10)
         overrides.setdefault("train.eval_steps", 5)
+        overrides.setdefault("train.eval_strategy", "steps")
         overrides.setdefault("train.save_steps", 10)
         overrides.setdefault("train.logging_steps", 1)
+        overrides.setdefault("train.gen_eval_steps", 5)
+        overrides.setdefault("train.gen_eval_samples", 4)
         overrides.setdefault("data.max_train_samples", 16)
         overrides.setdefault("data.max_eval_samples", 8)
 

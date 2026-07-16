@@ -75,6 +75,9 @@ python scripts/02_train.py `
   --data  configs/data/cord.yaml `
   --train configs/train/sft_qlora.yaml
 
+# Продолжить прерванный прогон с последнего чекпоинта
+python scripts/02_train.py --resume outputs/<run_id>
+
 # Оценка: baseline (без адаптера) vs адаптер на одном тест-сете
 python scripts/03_evaluate.py --adapter outputs/<run_id>/adapter --limit 100
 ```
@@ -107,6 +110,17 @@ python scripts/02_train.py --set model.lora.lora_plus_lr_ratio=16   # LoRA+ (LR 
 ```powershell
 pip install -e .[constrained]     # ставит outlines
 python scripts/03_evaluate.py --adapter outputs/<run_id>/adapter --constrained --out outputs/eval_run
+```
+
+### Метрики во время обучения
+
+Помимо loss-eval (`eval_strategy: steps` + `load_best_model_at_end`), каждые
+`gen_eval_steps` шагов коллбэк генерирует на маленьком срезе eval-сета и логирует
+`gen_json_valid_rate` / `gen_field_f1` — видно момент, когда модель «щёлкает»
+формат JSON. Логи идут в TensorBoard (`report_to: ["tensorboard"]`):
+
+```powershell
+tensorboard --logdir outputs
 ```
 
 ### Богатый eval
