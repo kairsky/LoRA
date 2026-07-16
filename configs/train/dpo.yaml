@@ -1,0 +1,38 @@
+# DPO (preference) stage on top of an SFT adapter. Notes vs sft_qlora.yaml:
+#   - learning rate is ~40x lower: DPO nudges an already-trained policy,
+#     SFT-scale LR destroys it;
+#   - fewer steps: preferences saturate fast on a narrow task like ours;
+#   - no loss-eval / gen-eval: DPO logs its own reward margins instead.
+output_dir: outputs
+run_name: null
+
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1
+gradient_accumulation_steps: 16
+
+learning_rate: 5.0e-6
+num_train_epochs: 1.0
+max_steps: 200
+
+optim: paged_adamw_8bit
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+weight_decay: 0.0
+max_grad_norm: 0.3
+
+bf16: true
+fp16: false
+
+logging_steps: 5
+eval_strategy: "no"
+eval_steps: 100
+save_steps: 100
+save_total_limit: 2
+load_best_model_at_end: false
+gen_eval_steps: 0
+
+dpo_beta: 0.1
+
+dataloader_num_workers: 0
+report_to: ["tensorboard"]
+seed: 42

@@ -123,6 +123,9 @@ class TrainConfig(BaseModel):
     dataloader_num_workers: int = 0  # 0 is safest on native Windows
     report_to: list[str] = Field(default_factory=list)  # e.g. ["tensorboard"]
     seed: int = 42
+    # DPO stage only: how hard to push chosen above rejected (higher = stronger
+    # pull towards preferences, lower = stay closer to the reference policy).
+    dpo_beta: float = 0.1
 
 
 class RunConfig(BaseModel):

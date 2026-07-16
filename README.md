@@ -132,6 +132,35 @@ tensorboard --logdir outputs
 `exact_match` и **per-field** precision/recall/F1, батчит генерацию (`--batch-size`),
 нормализует числа при сравнении и пишет `predictions_*.jsonl` + `metrics.json` (`--out`).
 
+### DPO: preference-обучение поверх SFT
+
+Вторая стадия: пары «правильный JSON vs правдоподобно-неправильный» и
+`DPOTrainer` (TRL) поверх SFT-адаптера. Reference-модель не нужна — с PEFT
+адаптер просто временно отключается (экономия VRAM на одном GPU).
+
+```powershell
+# 1) Собрать пары. Оффлайн-режим: rejected = испорченный gold
+#    (сбитые цифры, потерянный/переименованный ключ, проза вокруг JSON, обрыв)
+python scripts/05_make_pairs.py --data configs/data/cord.yaml --n 256 --out outputs/pairs/cord.jsonl
+
+#    Либо из реальных ошибок модели (после scripts/03_evaluate.py --out ...):
+python scripts/05_make_pairs.py --from-predictions outputs/eval/predictions_baseline.jsonl `
+  --split validation --out outputs/pairs/cord_hard.jsonl
+
+# 2) DPO поверх SFT-адаптера
+python scripts/06_dpo.py `
+  --model configs/model/qwen3_5_9b_mm_qlora.yaml `
+  --data  configs/data/cord.yaml `
+  --pairs outputs/pairs/cord.jsonl `
+  --from-adapter outputs/<sft_run_id>/adapter
+
+# Смоук всей DPO-ветки: tiny-модель + синтетические чеки, полностью оффлайн
+python scripts/06_dpo.py --smoke
+```
+
+Гиперпараметры — `configs/train/dpo.yaml` (LR в ~40 раз ниже SFT, `dpo_beta`).
+В логах смотри `rewards/margins` и `rewards/accuracies` — они должны расти.
+
 ### Sweeps по гиперпараметрам и аблэйшены методов
 
 ```powershell
