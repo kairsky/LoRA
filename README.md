@@ -177,6 +177,21 @@ python scripts/04_sweep.py --sweep configs/sweep/target_modules.yaml # attention
 Аблэйшен `target_modules` работает через `model.lora.target_groups: all|attention|mlp`
 (фильтр в `modules_discovery.py`) — доступен и в обычном обучении через `--set`.
 
+### Демо и экспорт
+
+```powershell
+# Локальное Gradio-демо: загрузил фото чека -> получил JSON
+pip install -e .[demo]
+python scripts/07_demo.py --model configs/model/tiny_mm_smoke.yaml --adapter outputs/<run_id>/adapter
+
+# Запушить адаптер на HF Hub (лёгкий, десятки МБ) или merged-модель
+python scripts/08_export.py --adapter outputs/<run_id>/adapter --push <user>/qwen3.5-cord-lora --private
+python scripts/08_export.py --adapter outputs/<run_id>/adapter --merge --base Qwen/Qwen3.5-9B --out outputs/merged
+```
+
+В демо есть кнопка «Random synthetic receipt» — можно проверять модель без
+своих картинок. CI (GitHub Actions) гоняет ruff + pytest на каждый push.
+
 ### Тесты
 
 ```powershell

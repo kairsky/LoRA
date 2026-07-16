@@ -30,14 +30,16 @@ def load_for_inference(model_cfg: ModelConfig, adapter_dir: str | Path | None):
 def extract(
     model,
     processor,
-    image_path: str | Path,
+    image: str | Path | Image.Image,
     instruction: str,
     max_new_tokens: int = 768,
     image_max_pixels: int | None = 1_048_576,
     schema: dict | None = None,
     constrained: bool = False,
 ) -> str:
-    image = _downscale(Image.open(image_path).convert("RGB"), image_max_pixels)
+    if not isinstance(image, Image.Image):
+        image = Image.open(image)
+    image = _downscale(image.convert("RGB"), image_max_pixels)
     messages = [
         {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": instruction}]}
     ]
